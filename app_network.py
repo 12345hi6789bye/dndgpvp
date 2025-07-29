@@ -5,9 +5,6 @@ import json
 import os
 from datetime import datetime
 import uuid
-import socket
-import subprocess
-import platform
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dndg-blackjack-secret-key'
@@ -17,93 +14,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 games = {}
 players = {}
 
-def get_network_ip():
-    """Get the actual network IP address, including hotspot scenarios"""
-    try:
-        # Try to get IP from network interfaces
-        if platform.system() == "Darwin":  # macOS
-            try:
-                # Try to get IP from route to 8.8.8.8
-                result = subprocess.run(['route', 'get', '8.8.8.8'], 
-                                      capture_output=True, text=True, timeout=5)
-                for line in result.stdout.split('\n'):
-                    if 'interface:' in line:
-                        interface = line.split(':')[1].strip()
-                        # Get IP for this interface
-                        ifconfig_result = subprocess.run(['ifconfig', interface], 
-                                                       capture_output=True, text=True, timeout=5)
-                        for ifconfig_line in ifconfig_result.stdout.split('\n'):
-                            if 'inet ' in ifconfig_line and '127.0.0.1' not in ifconfig_line:
-                                ip = ifconfig_line.split()[1]
-                                return ip
-            except:
-                pass
-        
-        # Fallback 1: Connect to external server to determine local IP
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                # Connect to Google DNS
-                s.connect(("8.8.8.8", 80))
-                ip = s.getsockname()[0]
-                if ip != "127.0.0.1":
-                    return ip
-        except:
-            pass
-        
-        # Fallback 2: Get hostname IP
-        try:
-            hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            if ip != "127.0.0.1":
-                return ip
-        except:
-            pass
-        
-        # Fallback 3: Get all network interfaces
-        try:
-            import netifaces
-            for interface in netifaces.interfaces():
-                addrs = netifaces.ifaddresses(interface)
-                if netifaces.AF_INET in addrs:
-                    for addr in addrs[netifaces.AF_INET]:
-                        ip = addr['addr']
-                        if not ip.startswith('127.') and not ip.startswith('169.254.'):
-                            return ip
-        except ImportError:
-            pass
-            
-        return "127.0.0.1"
-    except Exception as e:
-        print(f"Error getting network IP: {e}")
-        return "127.0.0.1"
-
-def get_all_network_ips():
-    """Get all possible network IPs for display"""
-    ips = set()
-    
-    # Add the primary network IP
-    primary_ip = get_network_ip()
-    ips.add(primary_ip)
-    
-    try:
-        # Get all network interfaces (manual approach for cross-platform)
-        if platform.system() == "Darwin":  # macOS
-            try:
-                result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=10)
-                current_interface = None
-                for line in result.stdout.split('\n'):
-                    if line and not line.startswith('\t') and not line.startswith(' '):
-                        current_interface = line.split(':')[0]
-                    elif 'inet ' in line and '127.0.0.1' not in line:
-                        ip = line.strip().split()[1]
-                        if not ip.startswith('169.254.'):  # Skip link-local
-                            ips.add(ip)
-            except:
-                pass
-    except:
-        pass
-    
-    return list(ips)
+# Admin password for protected actions
+ADMIN_PASSWORD = "42376-EGRdfhbj-134fhud"
 
 class BlackjackGame:
     def __init__(self, game_id):
@@ -135,8 +47,17 @@ class BlackjackGame:
         random.shuffle(deck)
         return deck
     
-    def add_player(self, player_id, player_name):
-        if len(self.players) < 2:
+    def add_player(self, player_id, player_name, as_spectator=False):
+        if as_spectator:
+            # Add as spectator (no limit on spectators)
+            if 'spectators' not in self.__dict__:
+                self.spectators = {}
+            self.spectators[player_id] = {
+                "name": player_name,
+                "is_spectator": True
+            }
+            return True
+        elif len(self.players) < 2:
             self.players[player_id] = {
                 "name": player_name,
                 "hand": [],
@@ -154,6 +75,11 @@ class BlackjackGame:
         return False
     
     def remove_player(self, player_id):
+        # Check if player is a spectator first
+        if hasattr(self, 'spectators') and player_id in self.spectators:
+            del self.spectators[player_id]
+            return
+            
         if player_id in self.players:
             del self.players[player_id]
             if len(self.players) == 0:
@@ -188,6 +114,11 @@ class BlackjackGame:
         while total > 21 and aces > 0:
             total -= 10
             aces -= 1
+        
+        # 5-card trick: if player has 5 cards without busting, treat as 21
+        if len(hand) == 5 and total <= 21:
+            return 21
+            
         return total
     
     def hit(self, player_id):
@@ -203,6 +134,10 @@ class BlackjackGame:
             
             if self.players[player_id]["total"] > 21:
                 self.players[player_id]["status"] = "bust"
+                self.switch_turn()
+            elif len(self.players[player_id]["hand"]) == 5:
+                # 5-card trick achieved - automatically stand
+                self.players[player_id]["status"] = "stood"
                 self.switch_turn()
             else:
                 self.switch_turn()
@@ -243,6 +178,23 @@ class BlackjackGame:
         if len(active_players) == 0:
             self.game_state = "finished"
             self.determine_winner()
+            
+            # Schedule auto-next round after 2 seconds (unless someone died)
+            if self.game_state != "game_over":
+                import threading
+                def auto_next_round():
+                    import time
+                    time.sleep(2)
+                    if self.game_state == "finished":  # Only proceed if still finished
+                        self.reset_game()
+                        socketio.emit('game_update', self.get_game_state(), room=self.game_id)
+                        socketio.emit('game_reset', {
+                            'message': 'Auto-advancing to next round...'
+                        }, room=self.game_id)
+                
+                thread = threading.Thread(target=auto_next_round)
+                thread.daemon = True
+                thread.start()
     
     def determine_winner(self):
         """Determine winner and calculate damage based on score difference"""
@@ -325,10 +277,37 @@ class BlackjackGame:
             # Just continue with next round if no one died
             self.game_state = "playing"
     
+    def admin_give_card(self, target_player_id, card_name):
+        """Admin function to give a specific card to a player"""
+        if (target_player_id in self.players and 
+            self.players[target_player_id]["status"] == "playing"):
+            
+            # Find the card in the deck
+            card_to_give = None
+            for i, card in enumerate(self.deck):
+                if card["name"].lower() == card_name.lower():
+                    card_to_give = self.deck.pop(i)
+                    break
+            
+            if card_to_give:
+                self.players[target_player_id]["hand"].append(card_to_give)
+                self.players[target_player_id]["total"] = self.calculate_total(self.players[target_player_id]["hand"])
+                
+                if self.players[target_player_id]["total"] > 21:
+                    self.players[target_player_id]["status"] = "bust"
+                elif len(self.players[target_player_id]["hand"]) == 5:
+                    self.players[target_player_id]["status"] = "stood"
+                
+                self.check_game_end()
+                return card_to_give
+        return None
+    
     def get_game_state(self):
+        spectators = getattr(self, 'spectators', {})
         return {
             "game_id": self.game_id,
             "players": self.players,
+            "spectators": spectators,
             "current_player": self.current_player,
             "game_state": self.game_state,
             "winner": self.winner,
@@ -425,25 +404,55 @@ def on_join_game(data):
     player_id = session['player_id']
     player_name = session['player_name']
     game_id = data.get('game_id', 'default')
+    as_spectator = data.get('as_spectator', False)
     
     if game_id not in games:
         games[game_id] = BlackjackGame(game_id)
     
     game = games[game_id]
     
-    if game.add_player(player_id, player_name):
+    if game.add_player(player_id, player_name, as_spectator):
         join_room(game_id)
         players[player_id]['game_id'] = game_id
         
+        role = "spectator" if as_spectator else "player"
         emit('joined_game', {
             'game_id': game_id,
             'player_id': player_id,
-            'message': f'Joined game {game_id}'
+            'role': role,
+            'message': f'Joined game {game_id} as {role}'
         })
         
         socketio.emit('game_update', game.get_game_state(), room=game_id)
     else:
         emit('error', {'message': 'Game is full or error joining game'})
+
+@socketio.on('leave_game')
+def on_leave_game():
+    if 'player_id' not in session:
+        return
+    
+    player_id = session['player_id']
+    if player_id not in players:
+        return
+    
+    game_id = players[player_id].get('game_id')
+    if not game_id or game_id not in games:
+        return
+    
+    game = games[game_id]
+    player_name = players[player_id]["name"]
+    
+    game.remove_player(player_id)
+    leave_room(game_id)
+    players[player_id]['game_id'] = None
+    
+    socketio.emit('game_update', game.get_game_state(), room=game_id)
+    socketio.emit('player_action', {
+        'message': f'{player_name} left the game'
+    }, room=game_id)
+    
+    emit('left_game', {'message': 'You have left the game'})
 
 @socketio.on('hit')
 def on_hit():
@@ -533,43 +542,57 @@ def on_full_reset_game():
         'message': f'Game completely reset by {players[player_id]["name"]} - Health restored!'
     }, room=game_id)
 
-if __name__ == '__main__':
-    port = 3000  # Use available port from diagnostic
+@socketio.on('admin_give_card')
+def on_admin_give_card(data):
+    if 'player_id' not in session:
+        return
     
-    print("🎮 DNDG PVP Blackjack Server Starting...")
-    print("=" * 50)
+    player_id = session['player_id']
+    if player_id not in players:
+        return
     
-    # Get all possible network IPs
-    network_ips = get_all_network_ips()
+    # Check admin password
+    password = data.get('password', '')
+    if password != ADMIN_PASSWORD:
+        emit('error', {'message': 'Invalid admin password'})
+        return
     
-    print(f"📍 Local access: http://127.0.0.1:{port}")
-    print("")
-    print("🌐 Network access options:")
-    for ip in network_ips:
-        if ip != "127.0.0.1":
-            print(f"   • http://{ip}:{port}")
-    print("")
+    game_id = players[player_id].get('game_id')
+    if not game_id or game_id not in games:
+        return
     
-    print("📱 For iPad hotspot connections:")
-    print("   🎯 IMPORTANT: iPad should connect to:")
-    for ip in network_ips:
-        if ip.startswith("172.20.10.") and ip != "127.0.0.1":
-            print(f"      → http://{ip}:{port}")
-            print(f"   💡 The iPad (hotspot provider) should use this URL")
-            break
-    print("")
+    game = games[game_id]
+    target_player_id = data.get('target_player_id')
+    card_name = data.get('card_name')
     
-    print("🔧 Troubleshooting:")
-    print("   • iPad can't connect? Turn off iPad's firewall temporarily")
-    print("   • Still issues? Try Safari's private/incognito mode")
-    print("   • Check that iPad and laptop are on same hotspot")
-    print(f"   • Alternative ports: {port+1000}, {port+2000}")
-    print("")
-    
-    print("Starting server...")
-    print("=" * 50)
-    
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+    if target_player_id and card_name:
+        card = game.admin_give_card(target_player_id, card_name)
+        if card:
+            target_name = game.players[target_player_id]["name"]
+            socketio.emit('game_update', game.get_game_state(), room=game_id)
+            socketio.emit('card_drawn', {
+                'player_id': target_player_id,
+                'card': card,
+                'message': f'Admin gave {card["name"]} to {target_name}'
+            }, room=game_id)
+            emit('admin_success', {'message': f'Successfully gave {card["name"]} to {target_name}'})
+        else:
+            emit('error', {'message': 'Card not found or player cannot receive cards'})
+    else:
+        emit('error', {'message': 'Missing target player or card name'})
 
+if __name__ == '__main__':
+    # Get the local IP address
+    import socket
+    hostname = socket.gethostname()
+    local_ip = socket.gethostbyname(hostname)
+    
+    print(f"🎮 DNDG PVP Blackjack Server Starting...")
+    print(f"📍 Local access: http://127.0.0.1:8080")
+    print(f"🌐 Network access: http://{local_ip}:8080")
+    print(f"🎯 Other devices on WiFi can connect to: http://{local_ip}:8080")
+    print("")
+    
+    socketio.run(app, host='0.0.0.0', port=8080, debug=False)
 
 # commit test 2
