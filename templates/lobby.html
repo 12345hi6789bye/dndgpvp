@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h1>🎮 DNDG PVP Blackjack</h1>
+    <div class="casino-subtitle">💸 Room Lobby • Create or Join Rooms 💸</div>
+    <p>Welcome, <strong id="player-name">{{ player_name }}</strong>!</p>
+    <a href="/logout" class="btn secondary" style="font-size: 0.9em; padding: 10px 20px;">🚪 Logout</a>
+</div>
+
+<!-- Loading Screen -->
+<div id="loading-screen" class="loading-screen" style="display: none;">
+    <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <h2>🎰 Loading Room...</h2>
+        <p>Please wait while we prepare your game room</p>
+    </div>
+</div>
+
+<div class="card" id="main-content">
+    <div class="lobby-section">
+        <h2>🎲 Create New Room</h2>
+        <button id="create-room-btn" class="btn primary" style="padding: 15px 30px; font-size: 1.1em;">
+            🆕 Create New Room
+        </button>
+    </div>
+
+    <div class="lobby-section">
+        <h2>🔍 Join Existing Room</h2>
+        <div class="join-room-section">
+            <input type="text" id="room-code-input" placeholder="Enter room code (e.g., ABC123)" 
+                   style="padding: 12px; border-radius: 5px; border: none; margin-right: 10px; width: 200px;">
+            <button id="join-room-btn" class="btn secondary" style="padding: 12px 25px;">
+                🚪 Join Room
+            </button>
+        </div>
+    </div>
+
+    <div class="lobby-section">
+        <h2>🏠 Active Rooms</h2>
+        <button id="refresh-rooms-btn" class="btn secondary" style="margin-bottom: 15px;">
+            🔄 Refresh Rooms
+        </button>
+        <div id="room-list" class="room-list">
+            <p style="opacity: 0.7;">Click refresh to load active rooms...</p>
+        </div>
+    </div>
+
+    <div class="lobby-section">
+        <h2>⚙️ Admin Panel</h2>
+        <button id="admin-toggle-btn" class="btn" style="background: linear-gradient(45deg, #ff6b6b, #ee5a24);">
+            🔧 Admin Controls
+        </button>
+    </div>
+</div>
+
+<!-- Admin Panel -->
+<div id="admin-panel" class="admin-panel" style="display: none;">
+    <div class="admin-panel-content">
+        <h3>🔧 Admin Panel</h3>
+        
+        <div class="admin-section">
+            <h4>🏠 Room Management</h4>
+            <button id="admin-refresh-rooms" class="btn secondary">🔄 Refresh Rooms</button>
+            <div id="admin-room-list" class="admin-room-list">
+                <!-- Rooms will be populated here -->
+            </div>
+        </div>
+        
+        <div class="admin-section">
+            <button id="admin-close-btn" class="btn secondary">Close</button>
+        </div>
+        
+        <div class="admin-help">
+            <small>💡 Admin features: Delete rooms, view all active games</small>
+        </div>
+    </div>
+</div>
+
+<div id="status-messages"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+<script>
+const socket = io();
+
+// Elements
+const createRoomBtn = document.getElementById('create-room-btn');
+const joinRoomBtn = document.getElementById('join-room-btn');
+const roomCodeInput = document.getElementById('room-code-input');
+const refreshRoomsBtn = document.getElementById('refresh-rooms-btn');
+const roomList = document.getElementById('room-list');
+const loadingScreen = document.getElementById('loading-screen');
+const mainContent = document.getElementById('main-content');
+const statusMessages = document.getElementById('status-messages');
+
+// Admin elements
+const adminToggleBtn = document.getElementById('admin-toggle-btn');
+const adminPanel = document.getElementById('admin-panel');
+const adminCloseBtn = document.getElementById('admin-close-btn');
+const adminRefreshRooms = document.getElementById('admin-refresh-rooms');
+const adminRoomList = document.getElementById('admin-room-list');
+
+// Event listeners
+createRoomBtn.addEventListener('click', () => {
+    showLoading();
+    socket.emit('create_room');
+});
+
+joinRoomBtn.addEventListener('click', () => {
+    const roomCode = roomCodeInput.value.trim().toUpperCase();
+    if (roomCode) {
+        showLoading();
+        window.location.href = `/${roomCode}`;
+    } else {
+        showStatusMessage('Please enter a room code', 'error');
+    }
+});
+
+refreshRoomsBtn.addEventListener('click', () => {
+    socket.emit('get_room_list');
+});
+
+adminToggleBtn.addEventListener('click', () => {
+    const password = prompt('Enter admin password:');
+    if (password === '42376-EGRdfhbj-134fhud') {
+        adminPanel.style.display = 'block';
+        socket.emit('get_room_list');
+    } else if (password !== null) {
+        showStatusMessage('Invalid admin password', 'error');
+    }
+});
+
+adminCloseBtn.addEventListener('click', () => {
+    adminPanel.style.display = 'none';
+});
+
+adminRefreshRooms.addEventListener('click', () => {
+    socket.emit('get_room_list');
+});
+
+// Allow Enter key for room code input
+roomCodeInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        joinRoomBtn.click();
+    }
+});
+
+// Socket event handlers
+socket.on('room_created', (data) => {
+    hideLoading();
+    showStatusMessage(data.message, 'success');
+    setTimeout(() => {
+        window.location.href = `/${data.room_code}`;
+    }, 1000);
+});
+
+socket.on('room_list', (data) => {
+    updateRoomList(data.rooms);
+    updateAdminRoomList(data.rooms);
+});
+
+socket.on('admin_success', (data) => {
+    showStatusMessage(data.message, 'success');
+    socket.emit('get_room_list'); // Refresh room list
+});
+
+socket.on('error', (data) => {
+    hideLoading();
+    showStatusMessage(data.message, 'error');
+});
+
+// Functions
+function showLoading() {
+    loadingScreen.style.display = 'flex';
+    mainContent.style.display = 'none';
+}
+
+function hideLoading() {
+    loadingScreen.style.display = 'none';
+    mainContent.style.display = 'block';
+}
+
+function updateRoomList(rooms) {
+    if (rooms.length === 0) {
+        roomList.innerHTML = '<p style="opacity: 0.7;">No active rooms found</p>';
+        return;
+    }
+
+    roomList.innerHTML = rooms.map(room => `
+        <div class="room-item">
+            <div class="room-info">
+                <strong>🏠 ${room.room_code}</strong>
+                <span class="room-stats">
+                    👥 ${room.player_count}/2 players • 👁️ ${room.spectator_count} spectators
+                </span>
+                <span class="room-status status-${room.game_state}">${room.game_state}</span>
+            </div>
+            <div class="room-actions">
+                ${room.can_join ? 
+                    `<button onclick="joinRoom('${room.room_code}')" class="btn primary">🚪 Join</button>` : 
+                    ''
+                }
+                <button onclick="spectateRoom('${room.room_code}')" class="btn secondary">👁️ Spectate</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateAdminRoomList(rooms) {
+    if (rooms.length === 0) {
+        adminRoomList.innerHTML = '<p style="opacity: 0.7;">No active rooms found</p>';
+        return;
+    }
+
+    adminRoomList.innerHTML = rooms.map(room => `
+        <div class="admin-room-item">
+            <div class="room-info">
+                <strong>🏠 ${room.room_code}</strong>
+                <span class="room-stats">
+                    👥 ${room.player_count}/2 • 👁️ ${room.spectator_count} • ${room.game_state}
+                </span>
+            </div>
+            <div class="room-actions">
+                <button onclick="adminJoinRoom('${room.room_code}')" class="btn primary">🚪 Join</button>
+                <button onclick="adminSpectateRoom('${room.room_code}')" class="btn secondary">👁️ Spectate</button>
+                <button onclick="adminDeleteRoom('${room.room_code}')" class="btn danger">🗑️ Delete</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function joinRoom(roomCode) {
+    showLoading();
+    window.location.href = `/${roomCode}`;
+}
+
+function spectateRoom(roomCode) {
+    showLoading();
+    window.location.href = `/${roomCode}?spectate=true`;
+}
+
+function adminJoinRoom(roomCode) {
+    window.location.href = `/${roomCode}`;
+}
+
+function adminSpectateRoom(roomCode) {
+    window.location.href = `/${roomCode}?spectate=true`;
+}
+
+function adminDeleteRoom(roomCode) {
+    if (confirm(`Are you sure you want to delete room ${roomCode}?`)) {
+        const password = prompt('Confirm admin password:');
+        if (password) {
+            socket.emit('delete_room', {
+                room_code: roomCode,
+                password: password
+            });
+        }
+    }
+}
+
+function showStatusMessage(message, type = 'info') {
+    const messageEl = document.createElement('div');
+    messageEl.className = `status-message ${type}`;
+    messageEl.textContent = message;
+    
+    statusMessages.appendChild(messageEl);
+    
+    // Auto-remove message after 5 seconds
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.parentNode.removeChild(messageEl);
+        }
+    }, 5000);
+    
+    // Limit to 3 messages
+    while (statusMessages.children.length > 3) {
+        statusMessages.removeChild(statusMessages.firstChild);
+    }
+}
+
+// Initialize
+socket.connect();
+
+// Auto-refresh rooms every 10 seconds
+setInterval(() => {
+    socket.emit('get_room_list');
+}, 10000);
+
+// Initial room list load
+socket.emit('get_room_list');
+</script>
+
+<style>
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.loading-content {
+    text-align: center;
+    color: white;
+}
+
+.loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid #333;
+    border-top: 4px solid #ff6b6b;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.lobby-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.lobby-section h2 {
+    margin-top: 0;
+    color: #ff6b6b;
+}
+
+.join-room-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.room-list, .admin-room-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.room-item, .admin-room-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.room-info {
+    flex: 1;
+}
+
+.room-stats {
+    display: block;
+    font-size: 0.9em;
+    opacity: 0.8;
+    margin: 5px 0;
+}
+
+.room-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+
+.status-waiting { background: #ffa726; color: white; }
+.status-playing { background: #66bb6a; color: white; }
+.status-finished { background: #42a5f5; color: white; }
+.status-game_over { background: #ef5350; color: white; }
+
+.room-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.room-actions button {
+    padding: 8px 15px;
+    font-size: 0.9em;
+}
+
+.btn.danger {
+    background: linear-gradient(45deg, #ef5350, #c62828);
+    color: white;
+}
+
+.btn.danger:hover {
+    background: linear-gradient(45deg, #c62828, #b71c1c);
+}
+
+.admin-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.admin-panel-content {
+    background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
+    padding: 30px;
+    border-radius: 15px;
+    border: 2px solid #ff6b6b;
+    max-width: 800px;
+    max-height: 80vh;
+    overflow-y: auto;
+    width: 90%;
+}
+
+.admin-section {
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.admin-section h4 {
+    color: #ff6b6b;
+    margin-top: 0;
+}
+
+.admin-help {
+    text-align: center;
+    opacity: 0.7;
+    font-style: italic;
+}
+
+@media (max-width: 768px) {
+    .room-item, .admin-room-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .room-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .join-room-section {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .join-room-section input {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+}
+</style>
+{% endblock %}
