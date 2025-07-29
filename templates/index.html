@@ -1,0 +1,707 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h1>🎮 DNDG PVP Blackjack</h1>
+    <div class="casino-subtitle">💸 High Stakes • Real-Time PvP • Health System 💸</div>
+    <p>Welcome, <strong id="player-name">{{ player_name }}</strong>!</p>
+    <a href="/logout" class="btn secondary" style="font-size: 0.9em; padding: 10px 20px;">🚪 Logout</a>
+</div>
+
+<div class="card">
+    <div class="game-info">
+        <div>
+            <label for="game-id-input">🎰 Game Room:</label>
+            <input type="text" id="game-id-input" value="room1" style="padding: 8px; border-radius: 5px; border: none; margin-left: 10px;">
+            <button id="join-game-btn" class="btn secondary" style="margin-left: 10px; padding: 10px 20px;">🚪 Join Game</button>
+            <button id="join-spectator-btn" class="btn" style="margin-left: 10px; padding: 10px 20px; background: linear-gradient(45deg, #9c27b0, #673ab7);">👁️ Spectate</button>
+            <button id="leave-game-btn" class="btn secondary" style="margin-left: 10px; padding: 10px 20px; display: none;">🚪 Leave Game</button>
+        </div>
+        <div class="current-turn" id="turn-indicator">
+            🎲 Waiting to join game...
+        </div>
+        <div class="cards-left" id="cards-left">
+            🂠 Cards left: --
+        </div>
+    </div>
+</div>
+
+<div id="status-messages"></div>
+
+<div class="players-grid">
+    <div class="card player-card" id="player1-card">
+        <div class="player-header">
+            <span id="player1-name">Player 1</span>
+            <span class="player-status status-playing" id="player1-status">Waiting</span>
+        </div>
+        <div class="player-health">
+            <div class="health-bar">
+                <div class="health-fill" id="player1-health-fill" style="width: 100%"></div>
+                <span class="health-text" id="player1-health-text">💖 50/50 HP</span>
+            </div>
+        </div>
+        <div class="player-total" id="player1-total">--</div>
+        <div class="player-cards" id="player1-cards">
+            <div style="opacity: 0.5;">No cards yet</div>
+        </div>
+        <div class="player-stats" id="player1-stats">
+            <span class="wins">Wins: 0</span> | <span class="damage">Damage: 0</span>
+        </div>
+    </div>
+    
+    <div class="card player-card" id="player2-card">
+        <div class="player-header">
+            <span id="player2-name">Player 2</span>
+            <span class="player-status status-playing" id="player2-status">Waiting</span>
+        </div>
+        <div class="player-health">
+            <div class="health-bar">
+                <div class="health-fill" id="player2-health-fill" style="width: 100%"></div>
+                <span class="health-text" id="player2-health-text">💖 50/50 HP</span>
+            </div>
+        </div>
+        <div class="player-total" id="player2-total">--</div>
+        <div class="player-cards" id="player2-cards">
+            <div style="opacity: 0.5;">No cards yet</div>
+        </div>
+        <div class="player-stats" id="player2-stats">
+            <span class="wins">Wins: 0</span> | <span class="damage">Damage: 0</span>
+        </div>
+    </div>
+</div>
+
+<div id="spectators-section" style="display: none;">
+    <div class="card">
+        <h3>👁️ Spectators</h3>
+        <div id="spectators-list">No spectators</div>
+    </div>
+</div>
+
+<div class="controls">
+    <button id="hit-btn" class="btn" disabled>🎯 Hit</button>
+    <button id="stand-btn" class="btn secondary" disabled>🛑 Stand</button>
+    <button id="reset-btn" class="btn" style="background: linear-gradient(45deg, #9c27b0, #673ab7);">🔄 Next Round</button>
+    <button id="full-reset-btn" class="btn" style="background: linear-gradient(45deg, #f44336, #d32f2f);">🔥 Full Reset</button>
+</div>
+
+<div id="winner-announcement" class="winner-announcement" style="display: none;"></div>
+
+<!-- Admin Panel -->
+<div id="admin-panel" class="admin-panel" style="display: none;">
+    <div class="admin-panel-content">
+        <h3>🔧 Admin Panel</h3>
+        <div class="admin-section">
+            <label for="admin-target-player">Target Player:</label>
+            <select id="admin-target-player">
+                <option value="">Select Player...</option>
+            </select>
+        </div>
+        <div class="admin-section">
+            <label for="admin-card-name">Card Name:</label>
+            <input type="text" id="admin-card-name" placeholder="e.g., Ace of Spades">
+        </div>
+        <div class="admin-section">
+            <button id="admin-give-card-btn" class="btn">Give Card</button>
+            <button id="admin-close-btn" class="btn secondary">Close</button>
+        </div>
+        <div class="admin-help">
+            <small>Examples: "Ace of Spades", "King of Hearts", "7 of Diamonds"</small>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const socket = io();
+let currentGameId = null;
+let myPlayerId = null;
+let gameState = null;
+
+// DOM elements
+const joinGameBtn = document.getElementById('join-game-btn');
+const joinSpectatorBtn = document.getElementById('join-spectator-btn');
+const leaveGameBtn = document.getElementById('leave-game-btn');
+const gameIdInput = document.getElementById('game-id-input');
+const hitBtn = document.getElementById('hit-btn');
+const standBtn = document.getElementById('stand-btn');
+const resetBtn = document.getElementById('reset-btn');
+const fullResetBtn = document.getElementById('full-reset-btn');
+const turnIndicator = document.getElementById('turn-indicator');
+const cardsLeftEl = document.getElementById('cards-left');
+const statusMessages = document.getElementById('status-messages');
+const winnerAnnouncement = document.getElementById('winner-announcement');
+const spectatorsSection = document.getElementById('spectators-section');
+const spectatorsList = document.getElementById('spectators-list');
+const adminPanel = document.getElementById('admin-panel');
+
+// Admin panel elements
+const adminTargetPlayer = document.getElementById('admin-target-player');
+const adminCardName = document.getElementById('admin-card-name');
+const adminGiveCardBtn = document.getElementById('admin-give-card-btn');
+const adminCloseBtn = document.getElementById('admin-close-btn');
+
+// Player role and admin state
+let isSpectator = false;
+let adminKeysPressed = [];
+const ADMIN_KEY_SEQUENCE = ['Backspace', 'Equal'];
+
+// Player elements
+const player1Name = document.getElementById('player1-name');
+const player1Total = document.getElementById('player1-total');
+const player1Cards = document.getElementById('player1-cards');
+const player1Status = document.getElementById('player1-status');
+const player1HealthFill = document.getElementById('player1-health-fill');
+const player1HealthText = document.getElementById('player1-health-text');
+const player1Stats = document.getElementById('player1-stats');
+
+const player2Name = document.getElementById('player2-name');
+const player2Total = document.getElementById('player2-total');
+const player2Cards = document.getElementById('player2-cards');
+const player2Status = document.getElementById('player2-status');
+const player2HealthFill = document.getElementById('player2-health-fill');
+const player2HealthText = document.getElementById('player2-health-text');
+const player2Stats = document.getElementById('player2-stats');
+
+// Socket event handlers
+socket.on('connected', (data) => {
+    console.log('Connected:', data.message);
+});
+
+socket.on('joined_game', (data) => {
+    currentGameId = data.game_id;
+    myPlayerId = data.player_id;
+    isSpectator = data.role === 'spectator';
+    
+    console.log('My Player ID:', myPlayerId, 'Role:', data.role);
+    showStatusMessage(`Joined game: ${data.game_id} as ${data.role}`, 'success');
+    
+    joinGameBtn.textContent = 'Joined';
+    joinGameBtn.disabled = true;
+    joinSpectatorBtn.disabled = true;
+    leaveGameBtn.style.display = 'inline-block';
+    
+    if (isSpectator) {
+        hitBtn.style.display = 'none';
+        standBtn.style.display = 'none';
+        showStatusMessage('You are spectating - you cannot play cards', 'info');
+    }
+});
+
+socket.on('game_update', (data) => {
+    gameState = data;
+    updateGameDisplay();
+});
+
+socket.on('card_drawn', (data) => {
+    showStatusMessage(data.message, 'info');
+});
+
+socket.on('player_action', (data) => {
+    showStatusMessage(data.message, 'info');
+});
+
+socket.on('game_reset', (data) => {
+    showStatusMessage(data.message, 'success');
+    winnerAnnouncement.style.display = 'none';
+});
+
+socket.on('left_game', (data) => {
+    showStatusMessage(data.message, 'success');
+    joinGameBtn.textContent = '🚪 Join Game';
+    joinGameBtn.disabled = false;
+    joinSpectatorBtn.disabled = false;
+    leaveGameBtn.style.display = 'none';
+    hitBtn.style.display = 'inline-block';
+    standBtn.style.display = 'inline-block';
+    spectatorsSection.style.display = 'none';
+    isSpectator = false;
+    currentGameId = null;
+    myPlayerId = null;
+});
+
+socket.on('admin_success', (data) => {
+    showStatusMessage(data.message, 'success');
+});
+
+socket.on('error', (data) => {
+    showStatusMessage(data.message, 'error');
+});
+
+// Event listeners
+joinGameBtn.addEventListener('click', () => {
+    const gameId = gameIdInput.value.trim();
+    if (gameId) {
+        socket.emit('join_game', { game_id: gameId, as_spectator: false });
+    }
+});
+
+joinSpectatorBtn.addEventListener('click', () => {
+    const gameId = gameIdInput.value.trim();
+    if (gameId) {
+        socket.emit('join_game', { game_id: gameId, as_spectator: true });
+    }
+});
+
+leaveGameBtn.addEventListener('click', () => {
+    socket.emit('leave_game');
+});
+
+hitBtn.addEventListener('click', () => {
+    if (!isSpectator) {
+        socket.emit('hit');
+    }
+});
+
+standBtn.addEventListener('click', () => {
+    if (!isSpectator) {
+        socket.emit('stand');
+    }
+});
+
+resetBtn.addEventListener('click', () => {
+    const password = prompt('🔐 Enter admin password for next round:');
+    if (password) {
+        socket.emit('reset_game', { password: password });
+    }
+});
+
+fullResetBtn.addEventListener('click', () => {
+    if (confirm('Reset all health and stats? This will start a completely new game.')) {
+        const password = prompt('🔐 Enter admin password for full reset:');
+        if (password) {
+            socket.emit('full_reset_game', { password: password });
+        }
+    }
+});
+
+// Admin panel event listeners
+adminGiveCardBtn.addEventListener('click', () => {
+    const targetPlayerId = adminTargetPlayer.value;
+    const cardName = adminCardName.value.trim();
+    
+    if (!targetPlayerId || !cardName) {
+        showStatusMessage('Please select a player and enter a card name', 'error');
+        return;
+    }
+    
+    const password = prompt('🔐 Enter admin password:');
+    if (password) {
+        socket.emit('admin_give_card', {
+            password: password,
+            target_player_id: targetPlayerId,
+            card_name: cardName
+        });
+        adminCardName.value = '';
+    }
+});
+
+adminCloseBtn.addEventListener('click', () => {
+    adminPanel.style.display = 'none';
+});
+
+// Keyboard controls
+document.addEventListener('keydown', (e) => {
+    // Admin panel key sequence (Backspace + =)
+    if (e.key === 'Backspace' || e.key === 'Equal' || e.key === '=') {
+        adminKeysPressed.push(e.key === '=' ? 'Equal' : e.key);
+        if (adminKeysPressed.length > 2) {
+            adminKeysPressed.shift();
+        }
+        
+        if (adminKeysPressed.length === 2 && 
+            adminKeysPressed[0] === 'Backspace' && 
+            adminKeysPressed[1] === 'Equal') {
+            
+            const password = prompt('🔐 Enter admin password to access admin panel:');
+            if (password === '42376-EGRdfhbj-134fhud') {
+                openAdminPanel();
+                adminKeysPressed = [];
+            } else if (password !== null) {
+                showStatusMessage('Invalid admin password', 'error');
+            }
+            adminKeysPressed = [];
+        }
+    } else {
+        adminKeysPressed = [];
+    }
+    
+    // Game controls (only if not spectator and it's your turn)
+    if (!isSpectator && currentGameId && myPlayerId) {
+        if (e.code === 'Space' && !hitBtn.disabled) {
+            e.preventDefault();
+            socket.emit('hit');
+        } else if (e.code === 'Enter' && !standBtn.disabled) {
+            e.preventDefault();
+            socket.emit('stand');
+        }
+    }
+});
+// Allow Enter key to join game
+gameIdInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !joinGameBtn.disabled) {
+        joinGameBtn.click();
+    }
+});
+
+function openAdminPanel() {
+    // Update player dropdown
+    adminTargetPlayer.innerHTML = '<option value="">Select Player...</option>';
+    if (gameState && gameState.players) {
+        Object.entries(gameState.players).forEach(([playerId, playerData]) => {
+            const option = document.createElement('option');
+            option.value = playerId;
+            option.textContent = playerData.name;
+            adminTargetPlayer.appendChild(option);
+        });
+    }
+    adminPanel.style.display = 'block';
+}
+
+function updateGameDisplay() {
+    if (!gameState) return;
+    
+    // Update cards left
+    cardsLeftEl.textContent = `Cards left: ${gameState.cards_left}`;
+    
+    // Get player IDs
+    const playerIds = Object.keys(gameState.players);
+    
+    // Update player displays
+    if (playerIds.length >= 1) {
+        const player1Id = playerIds[0];
+        const player1Data = gameState.players[player1Id];
+        
+        player1Name.textContent = player1Data.name || 'Player 1';
+        const player1TotalValue = player1Data.total !== undefined ? player1Data.total : '--';
+        const player1HasTrick = player1Data.hand && player1Data.hand.length === 5 && player1Data.status !== 'bust';
+        player1Total.textContent = player1HasTrick && player1TotalValue === 21 ? `${player1TotalValue} ✨` : player1TotalValue;
+        updatePlayerCards(player1Cards, player1Data.hand || []);
+        updatePlayerStatus(player1Status, player1Data.status || 'waiting');
+        updatePlayerHealth(player1HealthFill, player1HealthText, player1Data.health !== undefined ? player1Data.health : 50);
+        updatePlayerStats(player1Stats, player1Data);
+    } else {
+        resetPlayerDisplay(1);
+    }
+    
+    if (playerIds.length >= 2) {
+        const player2Id = playerIds[1];
+        const player2Data = gameState.players[player2Id];
+        
+        player2Name.textContent = player2Data.name || 'Player 2';
+        const player2TotalValue = player2Data.total !== undefined ? player2Data.total : '--';
+        const player2HasTrick = player2Data.hand && player2Data.hand.length === 5 && player2Data.status !== 'bust';
+        player2Total.textContent = player2HasTrick && player2TotalValue === 21 ? `${player2TotalValue} ✨` : player2TotalValue;
+        updatePlayerCards(player2Cards, player2Data.hand || []);
+        updatePlayerStatus(player2Status, player2Data.status || 'waiting');
+        updatePlayerHealth(player2HealthFill, player2HealthText, player2Data.health !== undefined ? player2Data.health : 50);
+        updatePlayerStats(player2Stats, player2Data);
+    } else {
+        resetPlayerDisplay(2);
+    }
+    
+    // Update turn indicator and buttons
+    updateTurnDisplay();
+    
+    // Update spectators
+    updateSpectators();
+    
+    // Check for game end
+    if (gameState.game_state === 'finished') {
+        showWinner();
+    } else if (gameState.game_state === 'game_over') {
+        showGameOver();
+    }
+}
+
+function updateSpectators() {
+    if (gameState && gameState.spectators && Object.keys(gameState.spectators).length > 0) {
+        spectatorsSection.style.display = 'block';
+        const spectatorNames = Object.values(gameState.spectators).map(spec => spec.name);
+        spectatorsList.textContent = spectatorNames.join(', ');
+    } else {
+        spectatorsSection.style.display = 'none';
+    }
+}
+
+function updatePlayerCards(cardElement, hand) {
+    if (!hand || hand.length === 0) {
+        cardElement.innerHTML = '<div style="opacity: 0.5;">No cards yet</div>';
+        return;
+    }
+    
+    let cardsHtml = hand.map(card => 
+        `<div class="card-item">${card.name}</div>`
+    ).join('');
+    
+    // Add 5-card trick indicator
+    if (hand.length === 5) {
+        cardsHtml += '<div class="five-card-trick">🎉 5-CARD TRICK! 🎉</div>';
+    }
+    
+    cardElement.innerHTML = cardsHtml;
+}
+
+function updatePlayerStatus(statusElement, status) {
+    statusElement.className = 'player-status';
+    
+    switch (status) {
+        case 'playing':
+            statusElement.className += ' status-playing';
+            statusElement.textContent = 'Playing';
+            break;
+        case 'stood':
+            statusElement.className += ' status-stood';
+            statusElement.textContent = 'Stood';
+            break;
+        case 'bust':
+            statusElement.className += ' status-bust';
+            statusElement.textContent = 'Bust';
+            break;
+        default:
+            statusElement.textContent = 'Waiting';
+    }
+}
+
+function updatePlayerHealth(healthFill, healthText, health) {
+    const maxHealth = 50;
+    // Ensure health is a valid number
+    const currentHealth = (health !== undefined && health !== null && !isNaN(health)) ? Math.max(0, Math.min(maxHealth, health)) : maxHealth;
+    const healthPercent = (currentHealth / maxHealth) * 100;
+    
+    healthFill.style.width = healthPercent + '%';
+    healthText.textContent = `💖 ${currentHealth}/${maxHealth} HP`;
+    
+    // Update health bar color based on health percentage
+    healthFill.className = 'health-fill';
+    if (healthPercent <= 20) {
+        healthFill.classList.add('critical');
+    } else if (healthPercent <= 50) {
+        healthFill.classList.add('low');
+    }
+    
+    // Add pulsing effect for very low health
+    if (healthPercent <= 10) {
+        healthFill.style.animation = 'pulse-red 0.5s infinite, health-shine 2s ease-in-out infinite';
+    } else {
+        healthFill.style.animation = 'health-shine 2s ease-in-out infinite';
+    }
+}
+
+function updatePlayerStats(statsElement, playerData) {
+    const wins = playerData.wins || 0;
+    const damage = playerData.damage_taken || 0;
+    const rounds = playerData.rounds_played || 0;
+    
+    statsElement.innerHTML = `
+        <span class="wins">🏆 Wins: ${wins}</span> | 
+        <span class="rounds">🎲 Rounds: ${rounds}</span> | 
+        <span class="damage">💥 Last Damage: ${damage}</span>
+    `;
+    
+    // Show damage indicator if damage was taken
+    if (damage > 0) {
+        showDamageIndicator(statsElement.parentElement, damage);
+    }
+}
+
+function showDamageIndicator(playerCard, damage) {
+    // Remove existing damage indicator
+    const existing = playerCard.querySelector('.damage-indicator');
+    if (existing) {
+        existing.remove();
+    }
+    
+    // Create new damage indicator
+    const damageDiv = document.createElement('div');
+    damageDiv.className = 'damage-indicator';
+    damageDiv.textContent = `💥 -${damage} HP`;
+    
+    playerCard.style.position = 'relative';
+    playerCard.appendChild(damageDiv);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (damageDiv.parentNode) {
+            damageDiv.parentNode.removeChild(damageDiv);
+        }
+    }, 2000);
+}
+
+function resetPlayerDisplay(playerNumber) {
+    if (playerNumber === 1) {
+        player1Name.textContent = 'Player 1';
+        player1Total.textContent = '--';
+        player1Cards.innerHTML = '<div style="opacity: 0.5;">No cards yet</div>';
+        player1Status.textContent = 'Waiting';
+        player1Status.className = 'player-status';
+        updatePlayerHealth(player1HealthFill, player1HealthText, 50);
+        player1Stats.innerHTML = '<span class="wins">🏆 Wins: 0</span> | <span class="damage">💥 Damage: 0</span>';
+    } else {
+        player2Name.textContent = 'Player 2';
+        player2Total.textContent = '--';
+        player2Cards.innerHTML = '<div style="opacity: 0.5;">No cards yet</div>';
+        player2Status.textContent = 'Waiting';
+        player2Status.className = 'player-status';
+        updatePlayerHealth(player2HealthFill, player2HealthText, 50);
+        player2Stats.innerHTML = '<span class="wins">🏆 Wins: 0</span> | <span class="damage">💥 Damage: 0</span>';
+    }
+}
+
+function updateTurnDisplay() {
+    if (!gameState) return;
+    
+    const playerIds = Object.keys(gameState.players);
+    
+    if (gameState.game_state === 'waiting') {
+        turnIndicator.textContent = `🎰 Waiting for players (${playerIds.length}/2)`;
+        hitBtn.disabled = true;
+        standBtn.disabled = true;
+    } else if (gameState.game_state === 'finished') {
+        turnIndicator.textContent = '🎊 Game finished';
+        hitBtn.disabled = true;
+        standBtn.disabled = true;
+    } else if (gameState.current_player) {
+        const currentPlayerData = gameState.players[gameState.current_player];
+        turnIndicator.textContent = `🎯 ${currentPlayerData.name}'s turn`;
+        
+        // Enable buttons only if it's this player's turn and not a spectator
+        const isMyTurn = gameState.current_player === myPlayerId && !isSpectator;
+        console.log('Current player:', gameState.current_player, 'My ID:', myPlayerId, 'Is my turn:', isMyTurn, 'Is spectator:', isSpectator);
+        hitBtn.disabled = !isMyTurn;
+        standBtn.disabled = !isMyTurn;
+    } else {
+        turnIndicator.textContent = '🎲 Waiting...';
+        hitBtn.disabled = true;
+        standBtn.disabled = true;
+    }
+}
+
+function showWinner() {
+    if (!gameState || !gameState.winner) return;
+    
+    let message = '';
+    let damageInfo = '';
+    
+    if (gameState.winner === 'tie') {
+        const playerIds = Object.keys(gameState.players);
+        const allBust = playerIds.every(id => gameState.players[id].status === 'bust');
+        
+        if (allBust) {
+            message = '💥 Both players busted! No damage dealt.';
+        } else {
+            message = '🤝 It\'s a tie! No damage dealt.';
+        }
+    } else {
+        const winnerData = gameState.players[gameState.winner];
+        const playerIds = Object.keys(gameState.players);
+        const loserId = playerIds.find(id => id !== gameState.winner);
+        const loserData = gameState.players[loserId];
+        
+        const damage = loserData.damage_taken || 0;
+        const winnerHand = winnerData.hand || [];
+        const fiveCardTrick = winnerHand.length === 5 ? ' (5-CARD TRICK!)' : '';
+        message = `🎉 ${winnerData.name} wins with ${winnerData.total}${fiveCardTrick}!`;
+        damageInfo = `💥 ${loserData.name} takes ${damage} damage! (💖 ${loserData.health}/${50} HP remaining)`;
+    }
+    
+    winnerAnnouncement.innerHTML = `
+        <div>${message}</div>
+        ${damageInfo ? `<div style="font-size: 0.8em; margin-top: 10px;">${damageInfo}</div>` : ''}
+        ${gameState.game_state !== 'game_over' ? '<div style="font-size: 0.7em; margin-top: 15px; opacity: 0.8;">⏰ Next round starts in 2 seconds...</div>' : ''}
+    `;
+    winnerAnnouncement.style.display = 'block';
+    
+    // Auto-hide after 5 seconds unless someone died
+    if (gameState.game_state !== 'game_over') {
+        setTimeout(() => {
+            winnerAnnouncement.style.display = 'none';
+        }, 5000);
+    }
+}
+
+function showGameOver() {
+    if (!gameState || !gameState.winner) return;
+    
+    let message = '';
+    if (gameState.winner === 'double_death') {
+        message = '💀 Both players died! What a battle!';
+    } else {
+        const winnerData = gameState.players[gameState.winner];
+        message = `🏆 ${winnerData.name} wins the game!<br>💀 Opponent eliminated!`;
+    }
+    
+    // Create game over overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'game-over-overlay';
+    overlay.innerHTML = `
+        <div class="game-over-content">
+            <h2>🎮 GAME OVER</h2>
+            <p>${message}</p>
+            <br>
+            <button class="btn" onclick="socket.emit('full_reset_game'); this.parentElement.parentElement.remove();">
+                Start New Game
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+}
+
+function showStatusMessage(message, type = 'info') {
+    const messageEl = document.createElement('div');
+    messageEl.className = `status-message ${type}`;
+    messageEl.textContent = message;
+    
+    statusMessages.appendChild(messageEl);
+    
+    // Auto-remove message after 5 seconds
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.parentNode.removeChild(messageEl);
+        }
+    }, 5000);
+    
+    // Limit to 3 messages
+    while (statusMessages.children.length > 3) {
+        statusMessages.removeChild(statusMessages.firstChild);
+    }
+}
+
+// Initialize
+socket.connect();
+
+// Create floating casino elements
+function createFloatingElements() {
+    const floatingContainer = document.querySelector('.floating-elements');
+    const elements = ['💰', '🎰', '🎲', '💎', '🂠', '♠', '♣', '♥', '♦'];
+    
+    setInterval(() => {
+        if (Math.random() < 0.3) { // 30% chance every interval
+            const element = document.createElement('div');
+            element.textContent = elements[Math.floor(Math.random() * elements.length)];
+            element.style.position = 'absolute';
+            element.style.fontSize = Math.random() * 1.5 + 0.8 + 'em';
+            element.style.left = Math.random() * 100 + '%';
+            element.style.top = '-10%';
+            element.style.opacity = '0.1';
+            element.style.pointerEvents = 'none';
+            element.style.animation = `float-elements ${Math.random() * 10 + 15}s linear forwards`;
+            
+            floatingContainer.appendChild(element);
+            
+            // Remove element after animation
+            setTimeout(() => {
+                if (element.parentNode) {
+                    element.parentNode.removeChild(element);
+                }
+            }, 25000);
+        }
+    }, 3000);
+}
+
+// Start floating elements
+createFloatingElements();
+</script>
+{% endblock %}
