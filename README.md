@@ -20,12 +20,12 @@ A real-time multiplayer blackjack game that works across different computers on 
 
 2. **Start the server**:
    ```bash
-   python app.py
+   python app_production.py
    ```
 
 3. **Access the game**:
    - The server will display the IP address to use
-   - Open your browser and go to the displayed address (e.g., `http://192.168.1.100:8080`)
+   - Open your browser and go to the displayed address (e.g., `http://{ip}:8080`)
    - Other players on the same WiFi can access the game using the same URL
 
 ## How to Play
