@@ -1,19 +1,82 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- This page redirects to lobby - keeping for legacy support -->
-<script>
-window.location.href = '/';
-</script>
-
 <div class="header">
     <h1>🎮 DNDG PVP Blackjack</h1>
-    <div class="casino-subtitle">💸 Redirecting to lobby... 💸</div>
+    <div class="casino-subtitle">💸 Welcome to the Casino! 💸</div>
     <p>Welcome, <strong>{{ player_name }}</strong>!</p>
 </div>
 
 <div class="card">
-    <p>Redirecting to the new lobby system...</p>
-    <p>If you are not redirected automatically, <a href="/">click here</a>.</p>
+    <h2>🎲 Choose Your Game Mode</h2>
+    
+    <div class="game-mode-options">
+        <a href="/quickgame" class="game-mode-btn quick-game">
+            <div class="mode-icon">⚡</div>
+            <div class="mode-title">Quick Game</div>
+            <div class="mode-desc">Jump straight into a game</div>
+        </a>
+        
+        <button onclick="location.reload()" class="game-mode-btn lobby-mode">
+            <div class="mode-icon">🏛️</div>
+            <div class="mode-title">Lobby System</div>
+            <div class="mode-desc">Create or join rooms</div>
+        </button>
+    </div>
 </div>
+
+<style>
+.game-mode-options {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin: 30px 0;
+    flex-wrap: wrap;
+}
+
+.game-mode-btn {
+    background: linear-gradient(135deg, #1a4a5c 0%, #2d7a5c 100%);
+    border: 2px solid #4a9eff;
+    border-radius: 15px;
+    padding: 25px;
+    text-align: center;
+    text-decoration: none;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 200px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.game-mode-btn:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    border-color: #ffd700;
+}
+
+.mode-icon {
+    font-size: 48px;
+    margin-bottom: 10px;
+}
+
+.mode-title {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #ffd700;
+}
+
+.mode-desc {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.quick-game {
+    background: linear-gradient(135deg, #4a1a5c 0%, #7a2d5c 100%);
+}
+
+.lobby-mode {
+    background: linear-gradient(135deg, #1a4a5c 0%, #2d7a5c 100%);
+}
+</style>
 {% endblock %}

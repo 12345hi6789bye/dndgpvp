@@ -339,7 +339,34 @@ class BlackjackGame:
 def index():
     if 'player_name' not in session or 'player_id' not in session:
         return redirect(url_for('login'))
-    return render_template('index.html', player_name=session['player_name'])
+    return render_template('lobby.html', player_name=session['player_name'])
+
+@app.route('/<room_code>')
+def room(room_code):
+    if 'player_name' not in session or 'player_id' not in session:
+        return redirect(url_for('login'))
+    
+    # Check if room exists and get player count
+    room_exists = room_code in games
+    player_count = len(games[room_code].players) if room_exists else 0
+    can_join_as_player = player_count < 2
+    
+    return render_template('room.html', 
+                         player_name=session['player_name'],
+                         room_code=room_code,
+                         room_exists=room_exists,
+                         player_count=player_count,
+                         can_join_as_player=can_join_as_player)
+
+@app.route('/quickgame')
+def quickgame():
+    if 'player_name' not in session or 'player_id' not in session:
+        return redirect(url_for('login'))
+    return render_template('index_simple.html', player_name=session['player_name'])
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No Content response for favicon
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -591,6 +618,75 @@ def on_full_reset_game(data=None):
     socketio.emit('game_reset', {
         'message': f'Full game reset by {players[player_id]["name"]} (Admin) - All health and stats restored!'
     }, room=game_id)
+
+@socketio.on('create_room')
+def on_create_room():
+    if 'player_id' not in session:
+        return
+    
+    # Generate a unique room code
+    import string
+    room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    while room_code in games:  # Ensure uniqueness
+        room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    
+    games[room_code] = BlackjackGame(room_code)
+    
+    emit('room_created', {
+        'room_code': room_code,
+        'message': f'Room {room_code} created successfully!'
+    })
+
+@socketio.on('get_room_list')
+def on_get_room_list():
+    if 'player_id' not in session:
+        return
+    
+    room_list = []
+    for room_code, game in games.items():
+        player_count = len(game.players)
+        spectator_count = len(getattr(game, 'spectators', {}))
+        room_list.append({
+            'room_code': room_code,
+            'player_count': player_count,
+            'spectator_count': spectator_count,
+            'game_state': game.game_state,
+            'can_join': player_count < 2
+        })
+    
+    emit('room_list', {'rooms': room_list})
+
+@socketio.on('delete_room')
+def on_delete_room(data):
+    if 'player_id' not in session:
+        return
+    
+    room_code = data.get('room_code')
+    password = data.get('password', '')
+    
+    # Check admin password for room deletion
+    if password != ADMIN_PASSWORD:
+        emit('error', {'message': 'Invalid admin password for room deletion'})
+        return
+    
+    if room_code and room_code in games:
+        # Notify all players in the room
+        socketio.emit('room_deleted', {
+            'message': 'This room has been deleted by an administrator'
+        }, room=room_code)
+        
+        # Remove all players from the room
+        game = games[room_code]
+        for player_id in list(game.players.keys()):
+            if player_id in players:
+                players[player_id]['game_id'] = None
+        
+        # Delete the room
+        del games[room_code]
+        
+        emit('admin_success', {'message': f'Room {room_code} deleted successfully'})
+    else:
+        emit('error', {'message': 'Room not found'})
 
 if __name__ == '__main__':
     # Get the local IP address

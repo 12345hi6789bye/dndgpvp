@@ -304,8 +304,22 @@ adminCloseBtn?.addEventListener('click', () => {
 });
 
 // Keyboard controls
+let keysPressed = {};
+
 document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    
+    keysPressed[e.key] = true;
+    
+    // Check for admin panel shortcut (Backspace + =)
+    if (keysPressed['Backspace'] && keysPressed['=']) {
+        e.preventDefault();
+        const password = prompt('Enter admin password:');
+        if (password === '42376-EGRdfhbj-134fhud') {
+            adminPanel.style.display = 'block';
+        }
+        return;
+    }
     
     switch(e.key) {
         case ' ':
@@ -316,15 +330,11 @@ document.addEventListener('keydown', (e) => {
             e.preventDefault();
             if (!isSpectator) standBtn?.click();
             break;
-        case 'Backspace':
-            if (e.shiftKey && e.key === '=') {
-                const password = prompt('Enter admin password:');
-                if (password === '42376-EGRdfhbj-134fhud') {
-                    adminPanel.style.display = 'block';
-                }
-            }
-            break;
     }
+});
+
+document.addEventListener('keyup', (e) => {
+    delete keysPressed[e.key];
 });
 
 // Socket event handlers

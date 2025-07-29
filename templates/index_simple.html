@@ -1,0 +1,553 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h1>🎮 DNDG PVP Blackjack</h1>
+    <div class="casino-subtitle">💸 High Stakes • Real-Time PvP • Health System 💸</div>
+    <p>Welcome, <strong id="player-name">{{ player_name }}</strong>!</p>
+    <a href="/logout" class="btn secondary" style="font-size: 0.9em; padding: 10px 20px;">🚪 Logout</a>
+</div>
+
+<!-- Quick Game Section -->
+<div class="card">
+    <h2>🎯 Quick Game</h2>
+    <div class="game-info">
+        <div>
+            <label for="game-id-input">🎰 Game Room:</label>
+            <input type="text" id="game-id-input" value="room1" style="padding: 8px; border-radius: 5px; border: none; margin-left: 10px;">
+            <button id="join-game-btn" class="btn secondary" style="margin-left: 10px; padding: 10px 20px;">🚪 Join Game</button>
+            <button id="join-spectator-btn" class="btn" style="margin-left: 10px; padding: 10px 20px; background: linear-gradient(45deg, #9c27b0, #673ab7);">👁️ Spectate</button>
+            <button id="leave-game-btn" class="btn secondary" style="margin-left: 10px; padding: 10px 20px; display: none;">🚪 Leave Game</button>
+        </div>
+        <div class="current-turn" id="turn-indicator">
+            🎲 Waiting to join game...
+        </div>
+        <div class="cards-left" id="cards-left">
+            🂠 Cards left: --
+        </div>
+    </div>
+</div>
+
+<!-- Or Use Full Room System -->
+<div class="card">
+    <div style="text-align: center; padding: 20px;">
+        <h3>🏠 Want more features?</h3>
+        <p>Use the full room system with lobby, room codes, and admin controls!</p>
+        <a href="/" class="btn primary" style="padding: 15px 30px; text-decoration: none;">
+            🚀 Go to Full Lobby System
+        </a>
+    </div>
+</div>
+
+<div id="status-messages"></div>
+
+<div class="players-grid">
+    <div class="card player-card" id="player1-card">
+        <div class="player-header">
+            <span id="player1-name">Player 1</span>
+            <span class="player-status status-playing" id="player1-status">Waiting</span>
+        </div>
+        <div class="player-health">
+            <div class="health-bar">
+                <div class="health-fill" id="player1-health-fill" style="width: 100%"></div>
+                <span class="health-text" id="player1-health-text">💖 50/50 HP</span>
+            </div>
+        </div>
+        <div class="player-total" id="player1-total">--</div>
+        <div class="player-cards" id="player1-cards">
+            <div style="opacity: 0.5;">No cards yet</div>
+        </div>
+        <div class="player-stats" id="player1-stats">
+            <span class="wins">Wins: 0</span> | <span class="damage">Damage: 0</span>
+        </div>
+    </div>
+
+    <div class="card player-card" id="player2-card">
+        <div class="player-header">
+            <span id="player2-name">Player 2</span>
+            <span class="player-status status-playing" id="player2-status">Waiting</span>
+        </div>
+        <div class="player-health">
+            <div class="health-bar">
+                <div class="health-fill" id="player2-health-fill" style="width: 100%"></div>
+                <span class="health-text" id="player2-health-text">💖 50/50 HP</span>
+            </div>
+        </div>
+        <div class="player-total" id="player2-total">--</div>
+        <div class="player-cards" id="player2-cards">
+            <div style="opacity: 0.5;">No cards yet</div>
+        </div>
+        <div class="player-stats" id="player2-stats">
+            <span class="wins">Wins: 0</span> | <span class="damage">Damage: 0</span>
+        </div>
+    </div>
+</div>
+
+<!-- Spectators Section -->
+<div class="card" id="spectators-section" style="display: none;">
+    <h3>👁️ Spectators</h3>
+    <div id="spectators-list">
+        <!-- Spectators will be listed here -->
+    </div>
+</div>
+
+<!-- Game Controls -->
+<div class="card game-controls">
+    <div class="controls-row">
+        <button id="hit-btn" class="btn primary">🎯 Hit</button>
+        <button id="stand-btn" class="btn secondary">✋ Stand</button>
+        <button id="reset-btn" class="btn">🔄 New Round</button>
+        <button id="full-reset-btn" class="btn danger">💀 Full Reset</button>
+    </div>
+    <div class="controls-help">
+        <small>⌨️ Keyboard: Space=Hit, Enter=Stand, Backspace+=Admin</small>
+    </div>
+</div>
+
+<!-- Admin Panel -->
+<div id="admin-panel" class="admin-panel" style="display: none;">
+    <div class="admin-panel-content">
+        <h3>🔧 Admin Panel</h3>
+        <div class="admin-section">
+            <label for="admin-target-player">Target Player:</label>
+            <select id="admin-target-player">
+                <option value="">Select player...</option>
+            </select>
+        </div>
+        <div class="admin-section">
+            <label for="admin-card-name">Card Name:</label>
+            <input type="text" id="admin-card-name" placeholder="e.g., Ace of Spades">
+        </div>
+        <div class="admin-section">
+            <button id="admin-give-card-btn" class="btn">Give Card</button>
+            <button id="admin-close-btn" class="btn secondary">Close</button>
+        </div>
+        <div class="admin-help">
+            <small>💡 Enter exact card name (e.g., "Ace of Spades", "King of Hearts")</small>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+<script>
+const socket = io();
+
+let currentGameId = null;
+let myPlayerId = null;
+let isSpectator = false;
+let gameState = null;
+
+// Elements
+const joinGameBtn = document.getElementById('join-game-btn');
+const joinSpectatorBtn = document.getElementById('join-spectator-btn');
+const leaveGameBtn = document.getElementById('leave-game-btn');
+const gameIdInput = document.getElementById('game-id-input');
+
+const hitBtn = document.getElementById('hit-btn');
+const standBtn = document.getElementById('stand-btn');
+const resetBtn = document.getElementById('reset-btn');
+const fullResetBtn = document.getElementById('full-reset-btn');
+const statusMessages = document.getElementById('status-messages');
+
+const adminPanel = document.getElementById('admin-panel');
+const adminTargetPlayer = document.getElementById('admin-target-player');
+const adminCardName = document.getElementById('admin-card-name');
+const adminGiveCardBtn = document.getElementById('admin-give-card-btn');
+const adminCloseBtn = document.getElementById('admin-close-btn');
+
+// Turn and game info elements
+const turnIndicator = document.getElementById('turn-indicator');
+const cardsLeft = document.getElementById('cards-left');
+
+// Socket event handlers
+socket.on('connected', (data) => {
+    console.log('Connected:', data.message);
+});
+
+socket.on('joined_game', (data) => {
+    currentGameId = data.game_id;
+    myPlayerId = data.player_id;
+    isSpectator = data.role === 'spectator';
+    
+    console.log('My Player ID:', myPlayerId, 'Role:', data.role);
+    showStatusMessage(`Joined game: ${data.game_id} as ${data.role}`, 'success');
+    
+    joinGameBtn.textContent = 'Joined';
+    joinGameBtn.disabled = true;
+    joinSpectatorBtn.disabled = true;
+    leaveGameBtn.style.display = 'inline-block';
+    
+    if (isSpectator) {
+        hitBtn.style.display = 'none';
+        standBtn.style.display = 'none';
+        showStatusMessage('You are spectating - you cannot play cards', 'info');
+    }
+});
+
+socket.on('game_update', (data) => {
+    gameState = data;
+    updateGameDisplay();
+});
+
+socket.on('card_drawn', (data) => {
+    showStatusMessage(data.message, 'info');
+});
+
+socket.on('player_action', (data) => {
+    showStatusMessage(data.message, 'info');
+});
+
+socket.on('game_reset', (data) => {
+    showStatusMessage(data.message, 'success');
+});
+
+socket.on('admin_success', (data) => {
+    showStatusMessage(data.message, 'success');
+    adminCardName.value = '';
+});
+
+socket.on('left_game', (data) => {
+    showStatusMessage(data.message, 'info');
+    
+    // Reset UI
+    joinGameBtn.textContent = '🚪 Join Game';
+    joinGameBtn.disabled = false;
+    joinSpectatorBtn.disabled = false;
+    leaveGameBtn.style.display = 'none';
+    
+    hitBtn.style.display = 'inline-block';
+    standBtn.style.display = 'inline-block';
+    
+    currentGameId = null;
+    myPlayerId = null;
+    isSpectator = false;
+});
+
+socket.on('error', (data) => {
+    showStatusMessage(data.message, 'error');
+});
+
+// Event listeners
+joinGameBtn.addEventListener('click', () => {
+    const gameId = gameIdInput.value.trim() || 'default';
+    socket.emit('join_game', {
+        game_id: gameId,
+        as_spectator: false
+    });
+});
+
+joinSpectatorBtn.addEventListener('click', () => {
+    const gameId = gameIdInput.value.trim() || 'default';
+    socket.emit('join_game', {
+        game_id: gameId,
+        as_spectator: true
+    });
+});
+
+leaveGameBtn.addEventListener('click', () => {
+    socket.emit('leave_game');
+});
+
+hitBtn.addEventListener('click', () => {
+    if (!isSpectator) {
+        socket.emit('hit');
+    }
+});
+
+standBtn.addEventListener('click', () => {
+    if (!isSpectator) {
+        socket.emit('stand');
+    }
+});
+
+resetBtn.addEventListener('click', () => {
+    const password = prompt('Enter admin password for game reset:');
+    if (password) {
+        socket.emit('reset_game', { password: password });
+    }
+});
+
+fullResetBtn.addEventListener('click', () => {
+    if (confirm('Are you sure you want to fully reset the game? This will restore all health!')) {
+        const password = prompt('Enter admin password for full reset:');
+        if (password) {
+            socket.emit('full_reset_game', { password: password });
+        }
+    }
+});
+
+// Admin controls
+adminGiveCardBtn.addEventListener('click', () => {
+    const targetPlayerId = adminTargetPlayer.value;
+    const cardName = adminCardName.value.trim();
+    const password = prompt('Enter admin password:');
+    
+    if (targetPlayerId && cardName && password) {
+        socket.emit('admin_give_card', {
+            target_player_id: targetPlayerId,
+            card_name: cardName,
+            password: password
+        });
+    }
+});
+
+adminCloseBtn.addEventListener('click', () => {
+    adminPanel.style.display = 'none';
+});
+
+// Keyboard controls
+let keysPressed = {};
+
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    
+    keysPressed[e.key] = true;
+    
+    // Check for admin panel shortcut (Backspace + =)
+    if (keysPressed['Backspace'] && keysPressed['=']) {
+        e.preventDefault();
+        const password = prompt('Enter admin password:');
+        if (password === '42376-EGRdfhbj-134fhud') {
+            adminPanel.style.display = 'block';
+        }
+        return;
+    }
+    
+    switch(e.key) {
+        case ' ':
+            e.preventDefault();
+            if (!isSpectator) hitBtn.click();
+            break;
+        case 'Enter':
+            e.preventDefault();
+            if (!isSpectator) standBtn.click();
+            break;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    delete keysPressed[e.key];
+});
+
+function updateGameDisplay() {
+    if (!gameState) return;
+    
+    // Update turn indicator
+    if (gameState.current_player) {
+        const currentPlayerName = gameState.players[gameState.current_player]?.name || 'Unknown';
+        turnIndicator.textContent = `🎲 ${currentPlayerName}'s Turn`;
+        turnIndicator.className = gameState.current_player === myPlayerId ? 'current-turn my-turn' : 'current-turn';
+    } else {
+        turnIndicator.textContent = gameState.game_state === 'waiting' ? '⏳ Waiting for players...' : 
+                                  gameState.game_state === 'finished' ? '🏁 Round Finished' :
+                                  gameState.game_state === 'game_over' ? '💀 Game Over' : '🎲 Game Status';
+        turnIndicator.className = 'current-turn';
+    }
+    
+    // Update cards left
+    cardsLeft.textContent = `🂠 Cards left: ${gameState.cards_left}`;
+    
+    // Update players
+    const playerIds = Object.keys(gameState.players);
+    for (let i = 0; i < 2; i++) {
+        const playerId = playerIds[i];
+        const player = playerId ? gameState.players[playerId] : null;
+        const playerCard = document.getElementById(`player${i+1}-card`);
+        const playerName = document.getElementById(`player${i+1}-name`);
+        const playerStatus = document.getElementById(`player${i+1}-status`);
+        const playerTotal = document.getElementById(`player${i+1}-total`);
+        const playerCards = document.getElementById(`player${i+1}-cards`);
+        const playerHealthFill = document.getElementById(`player${i+1}-health-fill`);
+        const playerHealthText = document.getElementById(`player${i+1}-health-text`);
+        const playerStats = document.getElementById(`player${i+1}-stats`);
+        
+        if (player) {
+            playerCard.style.display = 'block';
+            playerName.textContent = player.name;
+            playerStatus.textContent = player.status.charAt(0).toUpperCase() + player.status.slice(1);
+            playerStatus.className = `player-status status-${player.status}`;
+            playerTotal.textContent = player.total > 0 ? player.total : '--';
+            
+            // Update cards display
+            if (player.hand && player.hand.length > 0) {
+                playerCards.innerHTML = player.hand.map(card => 
+                    `<div class="card-item">${card.name}</div>`
+                ).join('');
+            } else {
+                playerCards.innerHTML = '<div style="opacity: 0.5;">No cards yet</div>';
+            }
+            
+            // Update health
+            const healthPercent = (player.health / 50) * 100;
+            playerHealthFill.style.width = `${healthPercent}%`;
+            playerHealthText.textContent = `💖 ${player.health}/50 HP`;
+            
+            if (healthPercent <= 20) {
+                playerHealthFill.style.background = 'linear-gradient(90deg, #ff4757, #ff3838)';
+            } else if (healthPercent <= 50) {
+                playerHealthFill.style.background = 'linear-gradient(90deg, #ffa726, #ff9800)';
+            } else {
+                playerHealthFill.style.background = 'linear-gradient(90deg, #4CAF50, #45a049)';
+            }
+            
+            // Update stats
+            const damageText = player.damage_taken > 0 ? `${player.damage_taken} this round` : '0';
+            playerStats.innerHTML = `<span class="wins">Wins: ${player.wins}</span> | <span class="damage">Damage: ${damageText}</span>`;
+            
+            // Highlight current player
+            if (playerId === gameState.current_player) {
+                playerCard.classList.add('current-player');
+            } else {
+                playerCard.classList.remove('current-player');
+            }
+            
+            // Highlight my card
+            if (playerId === myPlayerId) {
+                playerCard.classList.add('my-player');
+            } else {
+                playerCard.classList.remove('my-player');
+            }
+        } else {
+            playerCard.style.display = 'none';
+        }
+    }
+    
+    // Update spectators
+    updateSpectators();
+    
+    // Update admin dropdown
+    adminTargetPlayer.innerHTML = '<option value="">Select player...</option>';
+    Object.entries(gameState.players).forEach(([playerId, player]) => {
+        const option = document.createElement('option');
+        option.value = playerId;
+        option.textContent = player.name;
+        adminTargetPlayer.appendChild(option);
+    });
+    
+    // Update controls based on game state and player turn
+    const isMyTurn = gameState.current_player === myPlayerId;
+    const canPlay = gameState.game_state === 'playing' && !isSpectator;
+    
+    hitBtn.disabled = !canPlay || !isMyTurn;
+    standBtn.disabled = !canPlay || !isMyTurn;
+    
+    if (isMyTurn && canPlay) {
+        hitBtn.classList.add('pulse');
+        standBtn.classList.add('pulse');
+    } else {
+        hitBtn.classList.remove('pulse');
+        standBtn.classList.remove('pulse');
+    }
+}
+
+function updateSpectators() {
+    const spectatorsSection = document.getElementById('spectators-section');
+    const spectatorsList = document.getElementById('spectators-list');
+    
+    if (gameState.spectators && Object.keys(gameState.spectators).length > 0) {
+        spectatorsSection.style.display = 'block';
+        spectatorsList.innerHTML = Object.values(gameState.spectators).map(spectator => 
+            `<span class="spectator-name">👁️ ${spectator.name}</span>`
+        ).join(' ');
+    } else {
+        spectatorsSection.style.display = 'none';
+    }
+}
+
+function showStatusMessage(message, type = 'info') {
+    const messageEl = document.createElement('div');
+    messageEl.className = `status-message ${type}`;
+    messageEl.textContent = message;
+    
+    statusMessages.appendChild(messageEl);
+    
+    // Auto-remove message after 5 seconds
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.parentNode.removeChild(messageEl);
+        }
+    }, 5000);
+    
+    // Limit to 3 messages
+    while (statusMessages.children.length > 3) {
+        statusMessages.removeChild(statusMessages.firstChild);
+    }
+}
+
+// Initialize
+socket.connect();
+
+// Create floating casino elements
+function createFloatingElements() {
+    if (!document.querySelector('.floating-elements')) return;
+    
+    const floatingContainer = document.querySelector('.floating-elements');
+    const elements = ['💰', '🎰', '🎲', '💎', '🂠', '♠', '♣', '♥', '♦'];
+    
+    setInterval(() => {
+        if (Math.random() < 0.3) { // 30% chance every interval
+            const element = document.createElement('div');
+            element.textContent = elements[Math.floor(Math.random() * elements.length)];
+            element.style.position = 'absolute';
+            element.style.fontSize = Math.random() * 1.5 + 0.8 + 'em';
+            element.style.left = Math.random() * 100 + '%';
+            element.style.top = '-10%';
+            element.style.opacity = '0.1';
+            element.style.pointerEvents = 'none';
+            element.style.animation = `float-elements ${Math.random() * 10 + 15}s linear forwards`;
+            
+            floatingContainer.appendChild(element);
+            
+            // Remove element after animation
+            setTimeout(() => {
+                if (element.parentNode) {
+                    element.parentNode.removeChild(element);
+                }
+            }, 25000);
+        }
+    }, 3000);
+}
+
+// Start floating elements
+createFloatingElements();
+
+// Additional styles for improved UX
+const style = document.createElement('style');
+style.textContent = `
+.spectator-name {
+    display: inline-block;
+    margin: 5px 10px;
+    padding: 5px 10px;
+    background: rgba(156, 39, 176, 0.2);
+    border-radius: 15px;
+    border: 1px solid rgba(156, 39, 176, 0.5);
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0); }
+}
+
+.current-player {
+    border: 2px solid #ff6b6b !important;
+    box-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+}
+
+.my-player {
+    border: 2px solid #4CAF50 !important;
+    box-shadow: 0 0 20px rgba(76, 175, 80, 0.3);
+}
+
+.my-turn {
+    color: #4CAF50 !important;
+    font-weight: bold;
+}
+`;
+document.head.appendChild(style);
+</script>
+{% endblock %}
