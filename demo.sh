@@ -43,3 +43,6 @@ cd "$(dirname "$0")"
 # Run the production app
 source .venv/bin/activate
 python app_production.py
+
+
+# hes

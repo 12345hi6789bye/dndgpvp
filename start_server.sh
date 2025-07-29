@@ -11,3 +11,5 @@ cd "$(dirname "$0")"
 # Activate virtual environment and run the production app
 source .venv/bin/activate
 python app_production.py
+
+# hes

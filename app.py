@@ -353,3 +353,6 @@ if __name__ == '__main__':
     print(f"Other devices on the same WiFi can access: http://{local_ip}:8080")
     
     socketio.run(app, host='0.0.0.0', port=8080, debug=True, allow_unsafe_werkzeug=True)
+
+
+# 3

@@ -73,3 +73,6 @@ if __name__ == "__main__":
         print()
         print("🔗 Manual connection:")
         print(f"   Open Safari on iPad and go to: {url}")
+
+
+# hes
