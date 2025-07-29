@@ -8,7 +8,12 @@ import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dndg-blackjack-secret-key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*",
+                   async_mode='threading',
+                   transports=['polling', 'websocket'],
+                   engineio_logger=False,
+                   socketio_logger=False)
 
 # Game state storage
 games = {}

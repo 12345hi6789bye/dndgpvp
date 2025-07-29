@@ -8,7 +8,12 @@ import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dndg-blackjack-secret-key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*",
+                   async_mode='threading',
+                   transports=['polling', 'websocket'],
+                   engineio_logger=False,
+                   socketio_logger=False)
 
 # Game state storage
 games = {}
@@ -700,5 +705,12 @@ if __name__ == '__main__':
     print(f"🎯 Other devices on WiFi can connect to: http://{local_ip}:8080")
     print("")
     
-    socketio.run(app, host='0.0.0.0', port=8080, debug=False)
+    # Try to use eventlet for better WebSocket support
+    try:
+        import eventlet
+        eventlet.monkey_patch()
+        socketio.run(app, host='0.0.0.0', port=8080, debug=False)
+    except ImportError:
+        # Fallback to threading mode if eventlet not available
+        socketio.run(app, host='0.0.0.0', port=8080, debug=False, allow_unsafe_werkzeug=True)
 #test 3
